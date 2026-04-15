@@ -1,0 +1,16 @@
+# Python
+.venv
+__pycache__/
+*.pyc
+*.pyo
+
+# Datasets (too large for GitHub)
+data/
+
+# Trained models
+Models/
+*.keras
+*.h5
+
+# Kaggle credentials
+.kaggle/
