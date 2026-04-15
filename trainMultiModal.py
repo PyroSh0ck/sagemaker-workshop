@@ -3,6 +3,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
+import os
 
 IMG_SIZE = 224
 BATCH_SIZE = 32
@@ -11,8 +12,24 @@ NUM_CLASSES = 8
 NUM_TABULAR_FEATURES = 5  # Age, BP_Sys, BP_Dia, SpO2, Calcium
 EPOCHS = 20
 
+# On SageMaker, data is copied to /opt/ml/input/data/
+# Locally it lives in the project root under data/
+IS_SAGEMAKER = os.path.exists('/opt/ml/input/data')
+DATA_ROOT = '/opt/ml/input/data' if IS_SAGEMAKER else 'data'
+MODEL_DIR = os.environ.get('SM_MODEL_DIR', 'Models')
+
+print(f"Running on {'SageMaker' if IS_SAGEMAKER else 'local'}")
+print(f"Data root: {DATA_ROOT}")
+
 # --- Data Loading & Cleaning ---
 df = pd.read_csv('bone_dataset.csv')
+
+# Remap local Windows paths to the correct data root for this environment
+df['image_path'] = df['image_path'].str.replace('\\', '/', regex=False)
+df['image_path'] = df['image_path'].apply(
+    lambda p: os.path.join(DATA_ROOT, '/'.join(p.replace('\\', '/').split('/')[1:]))
+    if not p.startswith(DATA_ROOT) else p
+)
 
 # Drop rows with missing image paths or invalid labels
 df = df.dropna(subset=['image_path'])
@@ -97,7 +114,7 @@ def build_combo_model(vision_base, tabular_dim):
     return keras.Model(inputs=[img_in, tab_in], outputs=outputs, name="Multimodal_Bone_Classifier")
 
 
-mura_model = keras.models.load_model('Models/mura_efficientnet.keras')
+mura_model = keras.models.load_model(os.path.join(MODEL_DIR, 'mura_efficientnet.keras'))
 vision_extractor = keras.Model(
     inputs=mura_model.input,
     outputs=mura_model.get_layer("avg_pool").output,
@@ -116,7 +133,7 @@ model.compile(
 model.summary()
 
 callbacks = [
-    keras.callbacks.ModelCheckpoint("best_multimodal_model.keras", save_best_only=True),
+    keras.callbacks.ModelCheckpoint(os.path.join(MODEL_DIR, 'best_multimodal_model.keras'), save_best_only=True),
     keras.callbacks.EarlyStopping(patience=3, restore_best_weights=True),
     keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=2, min_lr=1e-6)
 ]
