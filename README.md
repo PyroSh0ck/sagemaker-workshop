@@ -128,17 +128,37 @@ Training uses:
 | **Lambda + API Gateway** | Inference endpoint accessible by any application |
 | **CloudWatch** | Usage monitoring and cost alerts |
 
-### S3 Bucket Setup
-Name your bucket with `sagemaker` in the name (e.g. `your-sagemaker-bone-xray`) — SageMaker automatically gets read/write access to any bucket with `sagemaker` in the name without extra IAM configuration.
+### S3 Bucket
+All datasets are pre-uploaded to:
+```
+s3://sagemaker-bone-xray-baba/
+├── bone_dataset.csv
+└── data/
+    ├── arthritis/
+    ├── bone_cancer/
+    ├── bone_tumor/
+    ├── elbow_xray/
+    ├── fractures/
+    ├── mura/
+    ├── osteoporosis/
+    └── scoliosis/
+```
+
+The bucket name contains `sagemaker` so SageMaker automatically gets read/write access without extra IAM config.
 
 ### SageMaker Setup
-1. Create an IAM user with least-privilege permissions (S3 read/write on your bucket, SageMaker full access)
-2. Create a SageMaker Domain
-3. Open SageMaker Studio → JupyterLab → Create Space → Run Space
-4. Upload scripts and reference your S3 bucket:
-```python
-s3_path = 's3://your-sagemaker-bone-xray/data/bone_dataset.csv'
+1. Create an IAM user with `AmazonS3FullAccess` and `AmazonSageMakerFullAccess`
+2. Go to **SageMaker Unified Studio** → set up a domain
+3. Open **SageMaker Studio** → JupyterLab → Create Space (`ml.t3.medium`) → Run Space
+4. In the JupyterLab terminal:
+```bash
+git clone -b dev https://<YOUR_GITHUB_TOKEN>@github.com/PyroSh0ck/sagemaker-workshop.git
+cd sagemaker-workshop
+pip install -r requirements.txt
+aws s3 sync s3://sagemaker-bone-xray-baba/data/ data/
+aws s3 cp s3://sagemaker-bone-xray-baba/bone_dataset.csv bone_dataset.csv
 ```
+5. Then follow the Training steps below.
 
 ---
 
