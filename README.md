@@ -57,6 +57,16 @@ The model is a **multimodal neural network** combining two branches:
 
 ## Setup
 
+### Quick start (run everything at once)
+```bash
+bash setup_and_train.sh
+```
+This installs dependencies, syncs datasets from S3, and runs all three training steps in order.
+
+---
+
+### Manual steps
+
 ### 1. Install dependencies
 ```bash
 pip install -r requirements.txt
