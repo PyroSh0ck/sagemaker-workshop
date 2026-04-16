@@ -138,7 +138,7 @@ def create_dataset(dataframe, training=False):
         ds = ds.shuffle(buffer_size=5000, seed=42)
     ds = ds.map(preprocess_multimodal, num_parallel_calls=tf.data.AUTOTUNE)
     # Skip any samples that still fail decode after JPEG recovery.
-    ds = ds.apply(tf.data.experimental.ignore_errors())
+    ds = ds.ignore_errors()
     if training:
         ds = ds.map(augment, num_parallel_calls=tf.data.AUTOTUNE)
     ds = ds.batch(BATCH_SIZE, drop_remainder=False)
@@ -166,8 +166,14 @@ def build_combo_model(vision_base, tabular_dim, use_tabular):
         tabular_features = layers.BatchNormalization()(x_tab)
         fused = layers.Concatenate(axis=1)([vision_features, tabular_features])
     else:
-        # Keep tabular input connected for functional graph validity in image-only mode.
-        tab_stub = layers.Lambda(lambda t: t[:, :1] * 0.0, name="tabular_stub")(tab_in)
+        # Keep tabular input connected in image-only mode with a deterministic zero-output stub.
+        tab_stub = layers.Dense(
+            1,
+            use_bias=False,
+            kernel_initializer="zeros",
+            trainable=False,
+            name="tabular_stub",
+        )(tab_in)
         fused = layers.Concatenate(axis=1)([vision_features, tab_stub])
 
     x = layers.Dense(256, activation="relu")(fused)
@@ -251,7 +257,11 @@ history_finetune = model.fit(
 )
 
 # Evaluate on held-out test set with best checkpoint.
-best_model = keras.models.load_model(os.path.join(MODEL_DIR, 'best_multimodal_model.keras'))
+# `safe_mode=False` allows loading older checkpoints that may contain Lambda layers.
+best_model = keras.models.load_model(
+    os.path.join(MODEL_DIR, 'best_multimodal_model.keras'),
+    safe_mode=False,
+)
 test_loss, test_acc = best_model.evaluate(test_ds, verbose=1)
 print(f"Held-out test accuracy: {test_acc:.4f} | test loss: {test_loss:.4f}")
 
