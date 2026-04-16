@@ -11,6 +11,8 @@ NUM_CLASSES = 8
 NUM_TABULAR_FEATURES = 5  # Age, BP_Sys, BP_Dia, SpO2, Calcium
 HEAD_EPOCHS = 6
 FINETUNE_EPOCHS = 10
+TRAIN_FRAC = 0.7
+VAL_FRAC = 0.15
 
 # On SageMaker, data is copied to /opt/ml/input/data/
 # Locally it lives in the project root under data/
@@ -46,11 +48,32 @@ print(f"Using {'multimodal' if HAS_TABULAR_SIGNAL else 'image-only'} classifier 
 # Shuffle before split so classes aren't clustered
 df = df.sample(frac=1, random_state=42).reset_index(drop=True)
 
-# 80/20 stratified split to preserve class ratios
-train_df = df.groupby('label', group_keys=False).apply(lambda x: x.sample(frac=0.8, random_state=42))
-test_df = df.drop(train_df.index)
+# 70/15/15 stratified split to preserve class ratios and keep a true held-out test set.
+train_parts, val_parts, test_parts = [], [], []
+for _, label_df in df.groupby('label'):
+    label_df = label_df.sample(frac=1, random_state=42)
+    n = len(label_df)
+    n_train = int(n * TRAIN_FRAC)
+    n_val = int(n * VAL_FRAC)
+    # Ensure each split has at least 1 sample when possible.
+    if n_train < 1:
+        n_train = 1
+    if n_val < 1:
+        n_val = 1
+    if n_train + n_val >= n:
+        n_train = max(1, n - 2)
+        n_val = 1
+    n_test = n - n_train - n_val
 
-print(f"Train: {len(train_df)} | Test: {len(test_df)}")
+    train_parts.append(label_df.iloc[:n_train])
+    val_parts.append(label_df.iloc[n_train:n_train + n_val])
+    test_parts.append(label_df.iloc[n_train + n_val:])
+
+train_df = pd.concat(train_parts).sample(frac=1, random_state=42).reset_index(drop=True)
+val_df = pd.concat(val_parts).sample(frac=1, random_state=42).reset_index(drop=True)
+test_df = pd.concat(test_parts).sample(frac=1, random_state=42).reset_index(drop=True)
+
+print(f"Train: {len(train_df)} | Val: {len(val_df)} | Test: {len(test_df)}")
 print("Train label dist:\n", train_df['label'].value_counts().sort_index())
 
 # --- Class Weights (inverse frequency) ---
@@ -69,7 +92,8 @@ def preprocess_multimodal(image_path, tabular_stats, label):
     image = tf.io.read_file(image_path)
     image = tf.image.decode_image(image, channels=3, expand_animations=False)
     image = tf.image.resize(image, [IMG_SIZE, IMG_SIZE])
-    image = tf.cast(image, tf.float32) / 255.0
+    # MURA backbone was trained with pixel range [0, 255]. Keep the same scale.
+    image = tf.cast(image, tf.float32)
     # Keep label as integer — class_weight requires integer labels, not one-hot
     return {"vision_input": image, "tabular_input": tabular_stats}, label
 
@@ -91,11 +115,12 @@ def create_dataset(dataframe, training=False):
     ds = ds.map(preprocess_multimodal, num_parallel_calls=tf.data.AUTOTUNE)
     if training:
         ds = ds.map(augment, num_parallel_calls=tf.data.AUTOTUNE)
-    ds = ds.batch(BATCH_SIZE, drop_remainder=True)
+    ds = ds.batch(BATCH_SIZE, drop_remainder=False)
     ds = ds.prefetch(tf.data.AUTOTUNE)
     return ds
 
 train_ds = create_dataset(train_df, training=True)
+val_ds = create_dataset(val_df, training=False)
 test_ds = create_dataset(test_df, training=False)
 
 # --- Model ---
@@ -143,15 +168,20 @@ model.compile(
 model.summary()
 
 callbacks = [
-    keras.callbacks.ModelCheckpoint(os.path.join(MODEL_DIR, 'best_multimodal_model.keras'), save_best_only=True),
-    keras.callbacks.EarlyStopping(patience=3, restore_best_weights=True),
+    keras.callbacks.ModelCheckpoint(
+        os.path.join(MODEL_DIR, 'best_multimodal_model.keras'),
+        monitor='val_accuracy',
+        mode='max',
+        save_best_only=True
+    ),
+    keras.callbacks.EarlyStopping(monitor='val_accuracy', mode='max', patience=3, restore_best_weights=True),
     keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=2, min_lr=1e-6)
 ]
 
 history = model.fit(
     train_ds,
     epochs=HEAD_EPOCHS,
-    validation_data=test_ds,
+    validation_data=val_ds,
     class_weight=class_weights,
     callbacks=callbacks
 )
@@ -171,8 +201,13 @@ model.compile(
 )
 
 fine_tune_callbacks = [
-    keras.callbacks.ModelCheckpoint(os.path.join(MODEL_DIR, 'best_multimodal_model.keras'), save_best_only=True),
-    keras.callbacks.EarlyStopping(patience=3, restore_best_weights=True),
+    keras.callbacks.ModelCheckpoint(
+        os.path.join(MODEL_DIR, 'best_multimodal_model.keras'),
+        monitor='val_accuracy',
+        mode='max',
+        save_best_only=True
+    ),
+    keras.callbacks.EarlyStopping(monitor='val_accuracy', mode='max', patience=3, restore_best_weights=True),
     keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=2, min_lr=1e-7)
 ]
 
@@ -180,9 +215,14 @@ history_finetune = model.fit(
     train_ds,
     initial_epoch=len(history.history['loss']),
     epochs=HEAD_EPOCHS + FINETUNE_EPOCHS,
-    validation_data=test_ds,
+    validation_data=val_ds,
     class_weight=class_weights,
     callbacks=fine_tune_callbacks
 )
+
+# Evaluate on held-out test set with best checkpoint.
+best_model = keras.models.load_model(os.path.join(MODEL_DIR, 'best_multimodal_model.keras'))
+test_loss, test_acc = best_model.evaluate(test_ds, verbose=1)
+print(f"Held-out test accuracy: {test_acc:.4f} | test loss: {test_loss:.4f}")
 
 print("Training Complete. Model saved as best_multimodal_model.keras")
