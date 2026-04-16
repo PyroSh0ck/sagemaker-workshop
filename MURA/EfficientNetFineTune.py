@@ -45,11 +45,11 @@ img_augmentation = keras.Sequential(
 )
 
 # apply the augmentation and batching
-ds_train = ds_train.batch(BATCH_SIZE, drop_remainder=False)
+ds_train = ds_train.batch(BATCH_SIZE, drop_remainder=True)
 ds_train = ds_train.map(lambda x, y: (img_augmentation(x), y), num_parallel_calls=tf.data.AUTOTUNE)
 ds_train = ds_train.prefetch(tf.data.AUTOTUNE)
 
-ds_test = ds_test.batch(BATCH_SIZE, drop_remainder=False)
+ds_test = ds_test.batch(BATCH_SIZE, drop_remainder=True)
 ds_test = ds_test.prefetch(tf.data.AUTOTUNE)
 
 # the actual model
@@ -81,7 +81,8 @@ optimizer = keras.optimizers.Adam(learning_rate=1e-3)
 model.compile(
     optimizer=optimizer,
     loss="sparse_categorical_crossentropy",
-    metrics=["accuracy", keras.metrics.AUC(name="auc")]
+    metrics=["accuracy"],
+    jit_compile=False,
 )
 
 # Inverse-frequency class weighting to reduce majority-class bias.
@@ -97,7 +98,7 @@ callbacks = [
         monitor="val_loss", factor=0.5, patience=1, min_lr=1e-6
     ),
     keras.callbacks.EarlyStopping(
-        monitor="val_auc", mode="max", patience=2, restore_best_weights=True
+        monitor="val_accuracy", mode="max", patience=2, restore_best_weights=True
     ),
 ]
 
