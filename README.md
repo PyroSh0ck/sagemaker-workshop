@@ -60,7 +60,7 @@ The model is a **multimodal neural network** combining two branches:
 ### Quick start (run everything at once)
 In your SageMaker JupyterLab terminal:
 ```bash
-git clone https://<YOUR_GITHUB_TOKEN>@github.com/PyroSh0ck/sagemaker-workshop.git
+git clone https://github.com/PyroSh0ck/sagemaker-workshop.git
 cd sagemaker-workshop
 bash setup_and_train.sh
 ```
