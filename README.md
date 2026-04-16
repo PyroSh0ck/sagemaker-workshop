@@ -62,27 +62,11 @@ The model is a **multimodal neural network** combining two branches:
 pip install -r requirements.txt
 ```
 
-### 2. Configure Kaggle API
-Create `~/.kaggle/kaggle.json`:
-```json
-{"username": "<your_username>", "key": "<your_api_key>"}
-```
-Get your key from [kaggle.com](https://www.kaggle.com) → Settings → API → Create New Token.
-
-### 3. Download datasets
-All datasets are already downloaded into `data/`. If you need to re-download:
+### 2. Download datasets from S3
+All datasets (37,198 images across 8 classes) are hosted in a public S3 bucket. Pull them down with:
 ```bash
-python -c "
-from kaggle import api; api.authenticate()
-api.dataset_download_files('ziya07/bone-cancer-detection-dataset',                          path='data/bone_cancer',   unzip=True)
-api.dataset_download_files('mohamedgobara/multi-class-knee-osteoporosis-x-ray-dataset',     path='data/osteoporosis',  unzip=True)
-api.dataset_download_files('shashwatwork/knee-osteoarthritis-dataset-with-severity',        path='data/arthritis',     unzip=True)
-api.dataset_download_files('bmadushanirodrigo/fracture-multi-region-x-ray-data',            path='data/fractures',     unzip=True)
-api.dataset_download_files('hazemalaa14/bone-tumor-x-ray-for-yolo-object-detection',        path='data/bone_tumor',    unzip=True)
-api.dataset_download_files('salmankey/scoliosis-yolov5-annotated-spine-x-ray-dataset',      path='data/scoliosis',     unzip=True)
-api.dataset_download_files('ahmedahmoud/elbow-xray-dataset',                                path='data/elbow_xray',    unzip=True)
-api.dataset_download_files('cjinny/mura-v11',                                               path='data/mura',          unzip=True)
-"
+aws s3 sync s3://sagemaker-bone-xray-baba/data/ data/
+aws s3 cp s3://sagemaker-bone-xray-baba/bone_dataset.csv bone_dataset.csv
 ```
 
 ---
@@ -158,6 +142,8 @@ pip install -r requirements.txt
 aws s3 sync s3://sagemaker-bone-xray-baba/data/ data/
 aws s3 cp s3://sagemaker-bone-xray-baba/bone_dataset.csv bone_dataset.csv
 ```
+> No Kaggle account needed — all datasets are pre-hosted in the S3 bucket above.
+
 5. Then follow the Training steps below.
 
 ---
