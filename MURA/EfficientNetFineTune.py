@@ -22,12 +22,13 @@ def load_and_preprocess_image(path, label):
     image = tf.io.read_file(path)
     image = tf.image.decode_image(image, channels=3, expand_animations=False)
     image = tf.image.resize(image, [IMG_SIZE, IMG_SIZE])
-    image = tf.cast(image, tf.float32) / 255.0
-    label = tf.one_hot(label, NUM_CLASSES)
+    # EfficientNetV2 with include_preprocessing=True expects pixel range [0, 255].
+    image = tf.cast(image, tf.float32)
     return image, label
 
 # Make the tf datasets
 ds_train = tf.data.Dataset.from_tensor_slices((train_paths, train_labels))
+ds_train = ds_train.shuffle(buffer_size=len(train_paths), reshuffle_each_iteration=True)
 ds_train = ds_train.map(load_and_preprocess_image, num_parallel_calls=tf.data.AUTOTUNE)
 
 ds_test = tf.data.Dataset.from_tensor_slices((test_paths, test_labels))
@@ -44,11 +45,11 @@ img_augmentation = keras.Sequential(
 )
 
 # apply the augmentation and batching
-ds_train = ds_train.batch(BATCH_SIZE, drop_remainder=True)
+ds_train = ds_train.batch(BATCH_SIZE, drop_remainder=False)
 ds_train = ds_train.map(lambda x, y: (img_augmentation(x), y), num_parallel_calls=tf.data.AUTOTUNE)
 ds_train = ds_train.prefetch(tf.data.AUTOTUNE)
 
-ds_test = ds_test.batch(BATCH_SIZE, drop_remainder=True)
+ds_test = ds_test.batch(BATCH_SIZE, drop_remainder=False)
 ds_test = ds_test.prefetch(tf.data.AUTOTUNE)
 
 # the actual model
@@ -75,17 +76,40 @@ outputs = layers.Dense(NUM_CLASSES, activation="softmax", name="pred")(x)
 model = keras.Model(inputs, outputs, name="EfficientNet")
 
 # training
-optimizer = keras.optimizers.Adam(learning_rate=1e-2)
+optimizer = keras.optimizers.Adam(learning_rate=1e-3)
 
 model.compile(
     optimizer=optimizer,
-    loss="categorical_crossentropy",
-    metrics=["accuracy"]
+    loss="sparse_categorical_crossentropy",
+    metrics=["accuracy", keras.metrics.AUC(name="auc")]
 )
+
+# Inverse-frequency class weighting to reduce majority-class bias.
+class_counts = pd.Series(train_labels).value_counts().to_dict()
+total = len(train_labels)
+class_weight = {
+    0: total / (NUM_CLASSES * class_counts.get(0, 1)),
+    1: total / (NUM_CLASSES * class_counts.get(1, 1)),
+}
+
+callbacks = [
+    keras.callbacks.ReduceLROnPlateau(
+        monitor="val_loss", factor=0.5, patience=1, min_lr=1e-6
+    ),
+    keras.callbacks.EarlyStopping(
+        monitor="val_auc", mode="max", patience=2, restore_best_weights=True
+    ),
+]
 
 epochs = 5
 print("Starting training")
-hist = model.fit(ds_train, epochs=epochs, validation_data=ds_test)
+hist = model.fit(
+    ds_train,
+    epochs=epochs,
+    validation_data=ds_test,
+    class_weight=class_weight,
+    callbacks=callbacks,
+)
 
 import os
 os.makedirs("../Models", exist_ok=True)

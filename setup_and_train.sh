@@ -16,7 +16,7 @@ python generate_mura_csvs.py
 
 echo ""
 echo "=== Step 4: Fine-tuning EfficientNet on MURA ==="
-python EfficientNetFineTune.py
+XLA_FLAGS=--xla_gpu_cuda_data_dir=/opt/conda python EfficientNetFineTune.py
 
 cd ..
 
