@@ -15,6 +15,8 @@ from tensorflow.keras import layers
 IMG_SIZE = 224
 BATCH_SIZE = 32
 NUM_CLASSES = 2
+HEAD_EPOCHS = 5
+FINETUNE_EPOCHS = 5
 
 tf.config.optimizer.set_jit(False)
 tf.config.optimizer.set_experimental_options({"layout_optimizer": False})
@@ -78,7 +80,7 @@ pretrained_model.trainable = False
 # this is basically taken straight from keras documentation
 x = layers.GlobalAveragePooling2D(name="avg_pool")(pretrained_model.output)
 x = layers.BatchNormalization()(x)
-x = layers.Dropout(0.2, name="top_dropout")(x)
+x = layers.Dropout(0.3, name="top_dropout")(x)
 
 # Final prediction layer
 # num classes is gonna be 2 because we only determine whether its abnormal or normal
@@ -105,6 +107,12 @@ class_weight = {
 }
 
 callbacks = [
+    keras.callbacks.ModelCheckpoint(
+        filepath="../Models/mura_efficientnet.keras",
+        monitor="val_accuracy",
+        mode="max",
+        save_best_only=True,
+    ),
     keras.callbacks.ReduceLROnPlateau(
         monitor="val_loss", factor=0.5, patience=1, min_lr=1e-6
     ),
@@ -113,17 +121,55 @@ callbacks = [
     ),
 ]
 
-epochs = 5
-print("Starting training")
+print("Starting head training")
 hist = model.fit(
     ds_train,
-    epochs=epochs,
+    epochs=HEAD_EPOCHS,
     validation_data=ds_test,
     class_weight=class_weight,
     callbacks=callbacks,
 )
 
-import os
+# Unfreeze the upper part of the backbone for a low-LR fine-tuning pass.
+pretrained_model.trainable = True
+for layer in pretrained_model.layers[:-40]:
+    layer.trainable = False
+for layer in pretrained_model.layers:
+    if isinstance(layer, layers.BatchNormalization):
+        layer.trainable = False
+
+model.compile(
+    optimizer=keras.optimizers.Adam(learning_rate=1e-5),
+    loss="sparse_categorical_crossentropy",
+    metrics=["accuracy"],
+    jit_compile=False,
+)
+
+finetune_callbacks = [
+    keras.callbacks.ModelCheckpoint(
+        filepath="../Models/mura_efficientnet.keras",
+        monitor="val_accuracy",
+        mode="max",
+        save_best_only=True,
+    ),
+    keras.callbacks.ReduceLROnPlateau(
+        monitor="val_loss", factor=0.5, patience=1, min_lr=1e-7
+    ),
+    keras.callbacks.EarlyStopping(
+        monitor="val_accuracy", mode="max", patience=2, restore_best_weights=True
+    ),
+]
+
+print("Starting backbone fine-tuning")
+hist_finetune = model.fit(
+    ds_train,
+    initial_epoch=len(hist.history["loss"]),
+    epochs=HEAD_EPOCHS + FINETUNE_EPOCHS,
+    validation_data=ds_test,
+    class_weight=class_weight,
+    callbacks=finetune_callbacks,
+)
+
 os.makedirs("../Models", exist_ok=True)
-# SavedModel format (recommended over .h5 in Keras 3)
+# Save the final in-memory model as well; the best checkpoint is already saved above.
 model.save("../Models/mura_efficientnet.keras")
