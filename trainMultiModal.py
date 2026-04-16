@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
@@ -10,7 +9,8 @@ BATCH_SIZE = 32
 # 0=Normal, 1=BoneCancer, 2=Osteoporosis, 3=BoneTumor, 4=Scoliosis, 5=Arthritis, 6=Fracture, 7=Sprain
 NUM_CLASSES = 8
 NUM_TABULAR_FEATURES = 5  # Age, BP_Sys, BP_Dia, SpO2, Calcium
-EPOCHS = 20
+HEAD_EPOCHS = 6
+FINETUNE_EPOCHS = 10
 
 # On SageMaker, data is copied to /opt/ml/input/data/
 # Locally it lives in the project root under data/
@@ -39,6 +39,9 @@ df = df.drop_duplicates(subset='image_path')
 # Fill missing tabular values with 0 (all datasets are image-only)
 TABULAR_COLS = ['age', 'bp_sys', 'bp_dia', 'spo2', 'calcium']
 df[TABULAR_COLS] = df[TABULAR_COLS].fillna(0).astype('float32')
+HAS_TABULAR_SIGNAL = bool(df[TABULAR_COLS].to_numpy().any())
+
+print(f"Using {'multimodal' if HAS_TABULAR_SIGNAL else 'image-only'} classifier head")
 
 # Shuffle before split so classes aren't clustered
 df = df.sample(frac=1, random_state=42).reset_index(drop=True)
@@ -53,7 +56,12 @@ print("Train label dist:\n", train_df['label'].value_counts().sort_index())
 # --- Class Weights (inverse frequency) ---
 label_counts = train_df['label'].value_counts().sort_index()
 total = len(train_df)
-class_weights = {i: total / (NUM_CLASSES * count) for i, count in label_counts.items()}
+label_indices = label_counts.index.to_numpy(dtype='int32')
+label_values = label_counts.to_numpy(dtype='int32')
+class_weights = {
+    int(label): total / (NUM_CLASSES * int(count))
+    for label, count in zip(label_indices, label_values)
+}
 print("Class weights:", class_weights)
 
 # --- Dataset Pipeline ---
@@ -91,21 +99,23 @@ train_ds = create_dataset(train_df, training=True)
 test_ds = create_dataset(test_df, training=False)
 
 # --- Model ---
-def build_combo_model(vision_base, tabular_dim):
+def build_combo_model(vision_base, tabular_dim, use_tabular):
     img_in = keras.Input(shape=(IMG_SIZE, IMG_SIZE, 3), name="vision_input")
     tab_in = keras.Input(shape=(tabular_dim,), name="tabular_input")
 
     # training=False keeps BatchNorm in inference mode during feature extraction
     vision_features = vision_base(img_in, training=False)
-    vision_features = layers.GlobalAveragePooling2D()(vision_features)
+    if len(vision_features.shape) == 4:
+        vision_features = layers.GlobalAveragePooling2D()(vision_features)
     vision_features = layers.Dropout(0.2)(vision_features)
 
-    # MLP for tabular data
-    x_tab = layers.Dense(64, activation="relu")(tab_in)
-    x_tab = layers.Dense(128, activation="relu")(x_tab)
-    tabular_features = layers.BatchNormalization()(x_tab)
-
-    fused = layers.Concatenate(axis=1)([vision_features, tabular_features])
+    if use_tabular:
+        x_tab = layers.Dense(64, activation="relu")(tab_in)
+        x_tab = layers.Dense(128, activation="relu")(x_tab)
+        tabular_features = layers.BatchNormalization()(x_tab)
+        fused = layers.Concatenate(axis=1)([vision_features, tabular_features])
+    else:
+        fused = vision_features
 
     x = layers.Dense(256, activation="relu")(fused)
     x = layers.Dropout(0.3)(x)
@@ -122,7 +132,7 @@ vision_extractor = keras.Model(
 )
 vision_extractor.trainable = False
 
-model = build_combo_model(vision_extractor, NUM_TABULAR_FEATURES)
+model = build_combo_model(vision_extractor, NUM_TABULAR_FEATURES, HAS_TABULAR_SIGNAL)
 
 model.compile(
     optimizer=keras.optimizers.Adam(learning_rate=1e-3),
@@ -140,10 +150,39 @@ callbacks = [
 
 history = model.fit(
     train_ds,
-    epochs=EPOCHS,
+    epochs=HEAD_EPOCHS,
     validation_data=test_ds,
     class_weight=class_weights,
     callbacks=callbacks
+)
+
+# Fine-tune the top of the vision backbone on the actual 8-class target task.
+vision_extractor.trainable = True
+for layer in vision_extractor.layers[:-30]:
+    layer.trainable = False
+for layer in vision_extractor.layers:
+    if isinstance(layer, layers.BatchNormalization):
+        layer.trainable = False
+
+model.compile(
+    optimizer=keras.optimizers.Adam(learning_rate=1e-5),
+    loss="sparse_categorical_crossentropy",
+    metrics=["accuracy"]
+)
+
+fine_tune_callbacks = [
+    keras.callbacks.ModelCheckpoint(os.path.join(MODEL_DIR, 'best_multimodal_model.keras'), save_best_only=True),
+    keras.callbacks.EarlyStopping(patience=3, restore_best_weights=True),
+    keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=2, min_lr=1e-7)
+]
+
+history_finetune = model.fit(
+    train_ds,
+    initial_epoch=len(history.history['loss']),
+    epochs=HEAD_EPOCHS + FINETUNE_EPOCHS,
+    validation_data=test_ds,
+    class_weight=class_weights,
+    callbacks=fine_tune_callbacks
 )
 
 print("Training Complete. Model saved as best_multimodal_model.keras")

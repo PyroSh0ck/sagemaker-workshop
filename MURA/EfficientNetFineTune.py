@@ -15,8 +15,8 @@ from tensorflow.keras import layers
 IMG_SIZE = 224
 BATCH_SIZE = 32
 NUM_CLASSES = 2
-HEAD_EPOCHS = 5
-FINETUNE_EPOCHS = 5
+HEAD_EPOCHS = 8
+FINETUNE_EPOCHS = 12
 
 tf.config.optimizer.set_jit(False)
 tf.config.optimizer.set_experimental_options({"layout_optimizer": False})
