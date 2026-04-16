@@ -1,8 +1,15 @@
+import os
 import pandas as pd
+
+# Work around SageMaker TF/CUDA image issues where XLA JIT looks for libdevice
+# in the wrong location and crashes during graph compilation.
+os.environ["TF_XLA_FLAGS"] = "--tf_xla_auto_jit=0"
+os.environ["XLA_FLAGS"] = "--xla_gpu_cuda_data_dir=/opt/conda --xla_gpu_enable_triton_gemm=false"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
-import os
 
 IMG_SIZE = 224
 BATCH_SIZE = 32
@@ -19,6 +26,9 @@ VAL_FRAC = 0.15
 IS_SAGEMAKER = os.path.exists('/opt/ml/input/data')
 DATA_ROOT = '/opt/ml/input/data' if IS_SAGEMAKER else 'data'
 MODEL_DIR = os.environ.get('SM_MODEL_DIR', 'Models')
+
+tf.config.optimizer.set_jit(False)
+tf.config.optimizer.set_experimental_options({"layout_optimizer": False})
 
 print(f"Running on {'SageMaker' if IS_SAGEMAKER else 'local'}")
 print(f"Data root: {DATA_ROOT}")
@@ -140,7 +150,9 @@ def build_combo_model(vision_base, tabular_dim, use_tabular):
         tabular_features = layers.BatchNormalization()(x_tab)
         fused = layers.Concatenate(axis=1)([vision_features, tabular_features])
     else:
-        fused = vision_features
+        # Keep tabular input connected for functional graph validity in image-only mode.
+        tab_stub = layers.Lambda(lambda t: t[:, :1] * 0.0, name="tabular_stub")(tab_in)
+        fused = layers.Concatenate(axis=1)([vision_features, tab_stub])
 
     x = layers.Dense(256, activation="relu")(fused)
     x = layers.Dropout(0.3)(x)
@@ -162,7 +174,8 @@ model = build_combo_model(vision_extractor, NUM_TABULAR_FEATURES, HAS_TABULAR_SI
 model.compile(
     optimizer=keras.optimizers.Adam(learning_rate=1e-3),
     loss="sparse_categorical_crossentropy",  # sparse = integer labels, works with class_weight
-    metrics=["accuracy"]
+    metrics=["accuracy"],
+    jit_compile=False,
 )
 
 model.summary()
@@ -197,7 +210,8 @@ for layer in vision_extractor.layers:
 model.compile(
     optimizer=keras.optimizers.Adam(learning_rate=1e-5),
     loss="sparse_categorical_crossentropy",
-    metrics=["accuracy"]
+    metrics=["accuracy"],
+    jit_compile=False,
 )
 
 fine_tune_callbacks = [
