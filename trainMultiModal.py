@@ -99,8 +99,22 @@ print("Class weights:", class_weights)
 
 # --- Dataset Pipeline ---
 def preprocess_multimodal(image_path, tabular_stats, label):
-    image = tf.io.read_file(image_path)
-    image = tf.image.decode_image(image, channels=3, expand_animations=False)
+    image_bytes = tf.io.read_file(image_path)
+    lower_path = tf.strings.lower(image_path)
+    is_jpeg = tf.strings.regex_full_match(lower_path, ".*\\.(jpg|jpeg)$")
+
+    def decode_jpeg_recover():
+        return tf.image.decode_jpeg(
+            image_bytes,
+            channels=3,
+            try_recover_truncated=True,
+            acceptable_fraction=0.3,
+        )
+
+    def decode_generic():
+        return tf.image.decode_image(image_bytes, channels=3, expand_animations=False)
+
+    image = tf.cond(is_jpeg, decode_jpeg_recover, decode_generic)
     image = tf.image.resize(image, [IMG_SIZE, IMG_SIZE])
     # MURA backbone was trained with pixel range [0, 255]. Keep the same scale.
     image = tf.cast(image, tf.float32)
@@ -123,6 +137,8 @@ def create_dataset(dataframe, training=False):
     if training:
         ds = ds.shuffle(buffer_size=5000, seed=42)
     ds = ds.map(preprocess_multimodal, num_parallel_calls=tf.data.AUTOTUNE)
+    # Skip any samples that still fail decode after JPEG recovery.
+    ds = ds.apply(tf.data.experimental.ignore_errors())
     if training:
         ds = ds.map(augment, num_parallel_calls=tf.data.AUTOTUNE)
     ds = ds.batch(BATCH_SIZE, drop_remainder=False)
