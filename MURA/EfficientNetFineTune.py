@@ -1,4 +1,12 @@
+import os
 import pandas as pd
+
+# Work around SageMaker TF/CUDA image issues where XLA JIT looks for libdevice
+# in the wrong location and crashes during graph compilation.
+os.environ["TF_XLA_FLAGS"] = "--tf_xla_auto_jit=0"
+os.environ["XLA_FLAGS"] = "--xla_gpu_cuda_data_dir=/opt/conda --xla_gpu_enable_triton_gemm=false"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
@@ -7,6 +15,9 @@ from tensorflow.keras import layers
 IMG_SIZE = 224
 BATCH_SIZE = 32
 NUM_CLASSES = 2
+
+tf.config.optimizer.set_jit(False)
+tf.config.optimizer.set_experimental_options({"layout_optimizer": False})
 
 # Retrieving data
 train_df = pd.read_csv('train_image_paths.csv', header=None, names=['path'])
