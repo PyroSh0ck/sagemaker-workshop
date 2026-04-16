@@ -58,7 +58,10 @@ The model is a **multimodal neural network** combining two branches:
 ## Setup
 
 ### Quick start (run everything at once)
+In your SageMaker JupyterLab terminal:
 ```bash
+git clone -b dev https://<YOUR_GITHUB_TOKEN>@github.com/PyroSh0ck/sagemaker-workshop.git
+cd sagemaker-workshop
 bash setup_and_train.sh
 ```
 This installs dependencies, syncs datasets from S3, and runs all three training steps in order.
@@ -144,17 +147,8 @@ The bucket name contains `sagemaker` so SageMaker automatically gets read/write 
 1. Create an IAM user with `AmazonS3FullAccess` and `AmazonSageMakerFullAccess`
 2. Go to **SageMaker Unified Studio** → set up a domain
 3. Open **SageMaker Studio** → JupyterLab → Create Space (`ml.t3.medium`) → Run Space
-4. In the JupyterLab terminal:
-```bash
-git clone -b dev https://<YOUR_GITHUB_TOKEN>@github.com/PyroSh0ck/sagemaker-workshop.git
-cd sagemaker-workshop
-pip install -r requirements.txt
-aws s3 sync s3://sagemaker-bone-xray-baba/data/ data/
-aws s3 cp s3://sagemaker-bone-xray-baba/bone_dataset.csv bone_dataset.csv
-```
+4. In the JupyterLab terminal, clone and run the setup script (see **Quick start** above)
 > No Kaggle account needed — all datasets are pre-hosted in the S3 bucket above.
-
-5. Then follow the Training steps below.
 
 ---
 
