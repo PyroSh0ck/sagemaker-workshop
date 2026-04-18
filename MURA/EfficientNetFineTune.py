@@ -32,7 +32,7 @@ tf.keras.mixed_precision.set_global_policy(policy)
 
 # Constants
 IMG_SIZE = 224
-BATCH_SIZE = 96  # Larger batch size to maximize GPU utilization
+BATCH_SIZE = 64  # Balanced batch size for GPU memory
 NUM_CLASSES = 2
 HEAD_EPOCHS = 12
 FINETUNE_EPOCHS = 20
@@ -93,10 +93,10 @@ img_augmentation = keras.Sequential(
 # apply the augmentation and batching
 ds_train = ds_train.batch(BATCH_SIZE, drop_remainder=True)
 ds_train = ds_train.map(lambda x, y: (img_augmentation(x), y), num_parallel_calls=tf.data.AUTOTUNE)
-ds_train = ds_train.prefetch(tf.data.AUTOTUNE)
+ds_train = ds_train.prefetch(tf.data.AUTOTUNE)  # Don't override prefetch buffer
 
 ds_test = ds_test.batch(BATCH_SIZE, drop_remainder=True)
-ds_test = ds_test.prefetch(tf.data.AUTOTUNE)
+ds_test = ds_test.prefetch(1)  # Conservative prefetch to avoid memory overflow
 
 # the actual model
 inputs = keras.Input(shape=(IMG_SIZE, IMG_SIZE, 3))

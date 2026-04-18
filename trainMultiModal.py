@@ -31,7 +31,7 @@ policy = tf.keras.mixed_precision.Policy('mixed_float16')
 tf.keras.mixed_precision.set_global_policy(policy)
 
 IMG_SIZE = 224
-BATCH_SIZE = 96  # Larger batch size to maximize GPU utilization
+BATCH_SIZE = 64  # Balanced batch size for GPU memory
 # 0=Normal, 1=BoneCancer, 2=Osteoporosis, 3=BoneTumor, 4=Scoliosis, 5=Arthritis, 6=Fracture, 7=Sprain
 NUM_CLASSES = 8
 NUM_TABULAR_FEATURES = 5  # Age, BP_Sys, BP_Dia, SpO2, Calcium
@@ -166,7 +166,8 @@ def create_dataset(dataframe, training=False):
     if training:
         ds = ds.map(augment, num_parallel_calls=tf.data.AUTOTUNE)
     ds = ds.batch(BATCH_SIZE, drop_remainder=False)
-    ds = ds.prefetch(tf.data.AUTOTUNE)
+    # Conservative prefetch to avoid memory overflow
+    ds = ds.prefetch(1) if not training else ds.prefetch(2)
     return ds
 
 train_ds = create_dataset(train_df, training=True)
