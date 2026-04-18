@@ -11,13 +11,32 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 
+# Configure GPU to use ~95% of available memory for maximum performance
+gpus = tf.config.list_physical_devices('GPU')
+if gpus:
+    try:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        # Set virtual device limit to use ~95% of GPU memory
+        for gpu in gpus:
+            tf.config.set_logical_device_configuration(
+                gpu,
+                [tf.config.LogicalDeviceConfiguration(memory_limit=14650)]  # 95% of 15GB
+            )
+    except RuntimeError as e:
+        print(f"GPU memory config error: {e}")
+
+# Enable mixed precision training for faster computation
+policy = tf.keras.mixed_precision.Policy('mixed_float16')
+tf.keras.mixed_precision.set_global_policy(policy)
+
 IMG_SIZE = 224
-BATCH_SIZE = 32
+BATCH_SIZE = 96  # Larger batch size to maximize GPU utilization
 # 0=Normal, 1=BoneCancer, 2=Osteoporosis, 3=BoneTumor, 4=Scoliosis, 5=Arthritis, 6=Fracture, 7=Sprain
 NUM_CLASSES = 8
 NUM_TABULAR_FEATURES = 5  # Age, BP_Sys, BP_Dia, SpO2, Calcium
-HEAD_EPOCHS = 6
-FINETUNE_EPOCHS = 10
+HEAD_EPOCHS = 8
+FINETUNE_EPOCHS = 15
 TRAIN_FRAC = 0.7
 VAL_FRAC = 0.15
 
@@ -123,9 +142,14 @@ def preprocess_multimodal(image_path, tabular_stats, label):
 
 def augment(inputs, label):
     image = inputs["vision_input"]
+    # More aggressive augmentation for better generalization
     image = tf.image.random_flip_left_right(image)
-    image = tf.image.random_brightness(image, max_delta=0.1)
-    image = tf.image.random_contrast(image, lower=0.9, upper=1.1)
+    image = tf.image.random_flip_up_down(image)  # New
+    image = tf.image.random_brightness(image, max_delta=0.2)  # Increased
+    image = tf.image.random_contrast(image, lower=0.8, upper=1.2)  # Increased
+    # Rotation using tf.raw_ops for flexibility
+    angle = tf.random.uniform([], -0.3, 0.3)
+    image = tf.contrib.image.rotate(image, angle, interpolation='BILINEAR') if hasattr(tf, 'contrib') else image
     return {"vision_input": image, "tabular_input": inputs["tabular_input"]}, label
 
 def create_dataset(dataframe, training=False):
@@ -194,7 +218,7 @@ vision_extractor.trainable = False
 model = build_combo_model(vision_extractor, NUM_TABULAR_FEATURES, HAS_TABULAR_SIGNAL)
 
 model.compile(
-    optimizer=keras.optimizers.Adam(learning_rate=1e-3),
+    optimizer=keras.optimizers.Adam(learning_rate=5e-4),  # Lower learning rate for stability
     loss="sparse_categorical_crossentropy",  # sparse = integer labels, works with class_weight
     metrics=["accuracy"],
     jit_compile=False,
@@ -223,14 +247,14 @@ history = model.fit(
 
 # Fine-tune the top of the vision backbone on the actual 8-class target task.
 vision_extractor.trainable = True
-for layer in vision_extractor.layers[:-30]:
+for layer in vision_extractor.layers[:-50]:  # Unfreeze more layers for better fine-tuning
     layer.trainable = False
 for layer in vision_extractor.layers:
     if isinstance(layer, layers.BatchNormalization):
         layer.trainable = False
 
 model.compile(
-    optimizer=keras.optimizers.Adam(learning_rate=1e-5),
+    optimizer=keras.optimizers.Adam(learning_rate=3e-5),  # Slightly higher for better convergence
     loss="sparse_categorical_crossentropy",
     metrics=["accuracy"],
     jit_compile=False,
@@ -243,8 +267,8 @@ fine_tune_callbacks = [
         mode='max',
         save_best_only=True
     ),
-    keras.callbacks.EarlyStopping(monitor='val_accuracy', mode='max', patience=3, restore_best_weights=True),
-    keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=2, min_lr=1e-7)
+    keras.callbacks.EarlyStopping(monitor='val_accuracy', mode='max', patience=4, restore_best_weights=True),  # More patience
+    keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.3, patience=2, min_lr=1e-7)  # More aggressive LR reduction
 ]
 
 history_finetune = model.fit(

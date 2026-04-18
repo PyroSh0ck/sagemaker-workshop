@@ -11,15 +11,45 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 
+# Configure GPU to use ~95% of available memory for maximum performance
+gpus = tf.config.list_physical_devices('GPU')
+if gpus:
+    try:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        # Set virtual device limit to use ~95% of GPU memory
+        for gpu in gpus:
+            tf.config.set_logical_device_configuration(
+                gpu,
+                [tf.config.LogicalDeviceConfiguration(memory_limit=14650)]  # 95% of 15GB
+            )
+    except RuntimeError as e:
+        print(f"GPU memory config error: {e}")
+
+# Enable mixed precision training for faster computation
+policy = tf.keras.mixed_precision.Policy('mixed_float16')
+tf.keras.mixed_precision.set_global_policy(policy)
+
 # Constants
 IMG_SIZE = 224
-BATCH_SIZE = 32
+BATCH_SIZE = 96  # Larger batch size to maximize GPU utilization
 NUM_CLASSES = 2
-HEAD_EPOCHS = 8
-FINETUNE_EPOCHS = 12
+HEAD_EPOCHS = 12
+FINETUNE_EPOCHS = 20
 
 tf.config.optimizer.set_jit(False)
 tf.config.optimizer.set_experimental_options({"layout_optimizer": False})
+
+# Debug: Check GPU availability
+gpus = tf.config.list_physical_devices('GPU')
+print(f"\n{'='*50}")
+print(f"GPU DETECTION: {len(gpus)} GPU(s) found")
+if gpus:
+    for gpu in gpus:
+        print(f"  - {gpu}")
+else:
+    print("  WARNING: No GPUs detected! Training will be VERY slow.")
+print(f"{'='*50}\n")
 
 # Retrieving data
 train_df = pd.read_csv('train_image_paths.csv', header=None, names=['path'])
@@ -47,12 +77,15 @@ ds_train = ds_train.map(load_and_preprocess_image, num_parallel_calls=tf.data.AU
 ds_test = tf.data.Dataset.from_tensor_slices((test_paths, test_labels))
 ds_test = ds_test.map(load_and_preprocess_image, num_parallel_calls=tf.data.AUTOTUNE)
 
-# apply augmentation and batching
+# apply augmentation and batching - more aggressive augmentation
 img_augmentation = keras.Sequential(
     [
-        layers.RandomRotation(factor=0.15),
-        layers.RandomTranslation(height_factor=0.1, width_factor=0.1),
+        layers.RandomRotation(factor=0.25),
+        layers.RandomTranslation(height_factor=0.15, width_factor=0.15),
         layers.RandomFlip("horizontal"),
+        layers.RandomZoom(height_factor=0.2, width_factor=0.2),
+        layers.RandomBrightness(factor=0.15),
+        layers.RandomContrast(factor=0.15),
     ],
     name="img_augmentation",
 )
@@ -68,8 +101,8 @@ ds_test = ds_test.prefetch(tf.data.AUTOTUNE)
 # the actual model
 inputs = keras.Input(shape=(IMG_SIZE, IMG_SIZE, 3))
 
-pretrained_model = keras.applications.EfficientNetV2S(
-    include_top=False, # so we don't have to remove it manually for fine tuning
+pretrained_model = keras.applications.EfficientNetV2M(
+    include_top=False, # larger backbone for better feature extraction
     weights="imagenet",
     input_tensor=inputs
 )
@@ -80,7 +113,8 @@ pretrained_model.trainable = False
 # this is basically taken straight from keras documentation
 x = layers.GlobalAveragePooling2D(name="avg_pool")(pretrained_model.output)
 x = layers.BatchNormalization()(x)
-x = layers.Dropout(0.3, name="top_dropout")(x)
+x = layers.Dense(256, activation="relu")(x)
+x = layers.Dropout(0.4, name="top_dropout")(x)
 
 # Final prediction layer
 # num classes is gonna be 2 because we only determine whether its abnormal or normal
@@ -88,11 +122,8 @@ outputs = layers.Dense(NUM_CLASSES, activation="softmax", name="pred")(x)
 
 model = keras.Model(inputs, outputs, name="EfficientNet")
 
-# training
-optimizer = keras.optimizers.Adam(learning_rate=1e-3)
-
 model.compile(
-    optimizer=optimizer,
+    optimizer=keras.optimizers.Adam(learning_rate=5e-4),
     loss="sparse_categorical_crossentropy",
     metrics=["accuracy"],
     jit_compile=False,
