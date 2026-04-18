@@ -1,8 +1,31 @@
 #!/bin/bash
 set -e
 
+echo "=== GPU Detection & CUDA Setup ==="
+# Check if GPU is available
+if command -v nvidia-smi &> /dev/null; then
+    echo "✓ nvidia-smi found. GPU hardware detected:"
+    nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+else
+    echo "✗ nvidia-smi not found. GPU support may not be available."
+fi
+
+# Set CUDA library paths for TensorFlow to find GPU libraries
+export CUDA_HOME=/usr/local/cuda
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+export CUDA_PATH=$CUDA_HOME
+echo "Set CUDA paths:"
+echo "  CUDA_HOME=$CUDA_HOME"
+echo "  LD_LIBRARY_PATH includes $CUDA_HOME/lib64"
+
+echo ""
 echo "=== Step 1: Installing dependencies ==="
 pip install -r requirements.txt
+
+# Verify TensorFlow can detect GPU
+echo ""
+echo "Verifying TensorFlow GPU support..."
+python -c "import tensorflow as tf; gpus = tf.config.list_physical_devices('GPU'); print(f'TensorFlow detects {len(gpus)} GPU(s)'); [print(f'  - {gpu}') for gpu in gpus]" || echo "Warning: GPU detection check failed"
 
 echo ""
 echo "=== Step 2: Downloading datasets from S3 ==="
