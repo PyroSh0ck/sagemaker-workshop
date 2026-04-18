@@ -166,8 +166,8 @@ def create_dataset(dataframe, training=False):
     if training:
         ds = ds.map(augment, num_parallel_calls=tf.data.AUTOTUNE)
     ds = ds.batch(BATCH_SIZE, drop_remainder=False)
-    # Conservative prefetch to avoid memory overflow
-    ds = ds.prefetch(1) if not training else ds.prefetch(2)
+    # Moderate prefetch for better GPU utilization
+    ds = ds.prefetch(8 if training else 4)
     return ds
 
 train_ds = create_dataset(train_df, training=True)

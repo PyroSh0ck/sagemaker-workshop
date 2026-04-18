@@ -93,10 +93,10 @@ img_augmentation = keras.Sequential(
 # apply the augmentation and batching
 ds_train = ds_train.batch(BATCH_SIZE, drop_remainder=True)
 ds_train = ds_train.map(lambda x, y: (img_augmentation(x), y), num_parallel_calls=tf.data.AUTOTUNE)
-ds_train = ds_train.prefetch(tf.data.AUTOTUNE)  # Don't override prefetch buffer
+ds_train = ds_train.prefetch(8)  # Moderate prefetch for better GPU pipeline
 
 ds_test = ds_test.batch(BATCH_SIZE, drop_remainder=True)
-ds_test = ds_test.prefetch(1)  # Conservative prefetch to avoid memory overflow
+ds_test = ds_test.prefetch(4)  # Moderate prefetch for validation
 
 # the actual model
 inputs = keras.Input(shape=(IMG_SIZE, IMG_SIZE, 3))
