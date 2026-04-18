@@ -13,10 +13,22 @@ fi
 # Set CUDA library paths for TensorFlow to find GPU libraries
 export CUDA_HOME=/usr/local/cuda
 export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+
+# Add NVIDIA CUDA packages installed by pip (from conda site-packages)
+SITE_PACKAGES=$(python -c "import site; print(site.getsitepackages()[0])")
+export LD_LIBRARY_PATH=$SITE_PACKAGES/nvidia/cuda_runtime/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$SITE_PACKAGES/nvidia/cudnn/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$SITE_PACKAGES/nvidia/cublas/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$SITE_PACKAGES/nvidia/cusolver/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$SITE_PACKAGES/nvidia/cusparse/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$SITE_PACKAGES/nvidia/cufft/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$SITE_PACKAGES/nvidia/curand/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$SITE_PACKAGES/nvidia/nccl/lib:$LD_LIBRARY_PATH
+
 export CUDA_PATH=$CUDA_HOME
 echo "Set CUDA paths:"
 echo "  CUDA_HOME=$CUDA_HOME"
-echo "  LD_LIBRARY_PATH includes $CUDA_HOME/lib64"
+echo "  LD_LIBRARY_PATH updated with CUDA libraries"
 
 echo ""
 echo "=== Step 1: Installing dependencies ==="
