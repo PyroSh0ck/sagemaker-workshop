@@ -46,10 +46,30 @@ else
 fi
 
 echo ""
-echo "=== Step 2: Installing dependencies ==="
-pip install -r requirements.txt -q
+echo "=== Step 2: Installing dependencies (including NVIDIA CUDA libraries) ==="
+pip install --no-cache-dir -r requirements.txt -q
 
-# Verify TensorFlow can see GPU
+# Install NVIDIA libraries separately to ensure they're properly linked
+echo ""
+echo "=== Installing NVIDIA CUDA Runtime Libraries ==="
+pip install --no-cache-dir nvidia-cuda-runtime-cu12 nvidia-cudnn-cu12 nvidia-cublas-cu12 -q
+
+echo ""
+echo "=== Verifying CUDA library files ==="
+python -c "
+import os
+import site
+sp = site.getsitepackages()[0]
+libs = ['cuda_runtime', 'cudnn', 'cublas', 'curand', 'cusolver', 'cusparse']
+for lib in libs:
+    path = os.path.join(sp, 'nvidia', lib, 'lib')
+    if os.path.exists(path):
+        files = os.listdir(path)
+        print(f'✓ {lib}: {len(files)} files')
+    else:
+        print(f'✗ {lib}: NOT FOUND at {path}')
+"
+
 echo ""
 echo "=== Verifying TensorFlow GPU Detection ==="
 python -c "
@@ -59,9 +79,19 @@ print(f'TensorFlow detects {len(gpus)} GPU(s)')
 if len(gpus) > 0:
     print(f'  GPU 0: {gpus[0]}')
     print('  ✓ GPU properly configured!')
+    for gpu in gpus:
+        details = tf.config.experimental.get_device_details(gpu)
+        if details:
+            print(f'  Details: {details}')
 else:
     print('  ✗ WARNING: No GPUs detected by TensorFlow')
-    print('  This may cause very slow training')
+    print('  Checking for common issues:')
+    import subprocess
+    try:
+        result = subprocess.run(['nvidia-smi'], capture_output=True, text=True)
+        print(f'  nvidia-smi output: {result.stdout.split(chr(10))[8]}')
+    except:
+        print('  nvidia-smi: Not available')
 "
 
 # Step 3: Data prep
