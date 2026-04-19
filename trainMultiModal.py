@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import numpy as np
 
 # Work around SageMaker TF/CUDA image issues where XLA JIT looks for libdevice
 # in the wrong location and crashes during graph compilation.
@@ -29,6 +30,12 @@ if gpus:
 # Enable mixed precision training for faster computation
 policy = tf.keras.mixed_precision.Policy('mixed_float16')
 tf.keras.mixed_precision.set_global_policy(policy)
+
+# Ensemble support: use different random seeds for each model
+ENSEMBLE_SEED = int(os.environ.get('ENSEMBLE_SEED', 42))
+ENSEMBLE_MODEL_ID = os.environ.get('ENSEMBLE_MODEL_ID', None)
+tf.random.set_seed(ENSEMBLE_SEED)
+np.random.seed(ENSEMBLE_SEED)
 
 IMG_SIZE = 224
 BATCH_SIZE = 64  # Balanced batch size for GPU memory
@@ -227,9 +234,18 @@ model.compile(
 
 model.summary()
 
+# Determine checkpoint filename based on ensemble mode
+checkpoint_filename = 'best_multimodal_model.keras'
+if ENSEMBLE_MODEL_ID:
+    checkpoint_filename = f'ensemble_model_{ENSEMBLE_MODEL_ID}.keras'
+    print(f"\n{'='*60}")
+    print(f"ENSEMBLE MODE: Training model {ENSEMBLE_MODEL_ID} (seed={ENSEMBLE_SEED})")
+    print(f"Saving as: {checkpoint_filename}")
+    print(f"{'='*60}\n")
+
 callbacks = [
     keras.callbacks.ModelCheckpoint(
-        os.path.join(MODEL_DIR, 'best_multimodal_model.keras'),
+        os.path.join(MODEL_DIR, checkpoint_filename),
         monitor='val_accuracy',
         mode='max',
         save_best_only=True
@@ -263,13 +279,13 @@ model.compile(
 
 fine_tune_callbacks = [
     keras.callbacks.ModelCheckpoint(
-        os.path.join(MODEL_DIR, 'best_multimodal_model.keras'),
+        os.path.join(MODEL_DIR, checkpoint_filename),
         monitor='val_accuracy',
         mode='max',
         save_best_only=True
     ),
-    keras.callbacks.EarlyStopping(monitor='val_accuracy', mode='max', patience=4, restore_best_weights=True),  # More patience
-    keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.3, patience=2, min_lr=1e-7)  # More aggressive LR reduction
+    keras.callbacks.EarlyStopping(monitor='val_accuracy', mode='max', patience=4, restore_best_weights=True),
+    keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.3, patience=2, min_lr=1e-7)
 ]
 
 history_finetune = model.fit(
@@ -281,13 +297,16 @@ history_finetune = model.fit(
     callbacks=fine_tune_callbacks
 )
 
-# Evaluate on held-out test set with best checkpoint.
-# `safe_mode=False` allows loading older checkpoints that may contain Lambda layers.
-best_model = keras.models.load_model(
-    os.path.join(MODEL_DIR, 'best_multimodal_model.keras'),
-    safe_mode=False,
-)
-test_loss, test_acc = best_model.evaluate(test_ds, verbose=1)
-print(f"Held-out test accuracy: {test_acc:.4f} | test loss: {test_loss:.4f}")
+# Evaluate on held-out test set with best checkpoint (skip in ensemble mode)
+if not ENSEMBLE_MODEL_ID:
+    best_model = keras.models.load_model(
+        os.path.join(MODEL_DIR, checkpoint_filename),
+        safe_mode=False,
+    )
+    test_loss, test_acc = best_model.evaluate(test_ds, verbose=1)
+    print(f"Held-out test accuracy: {test_acc:.4f} | test loss: {test_loss:.4f}")
+    print(f"Training Complete. Model saved as {checkpoint_filename}")
+else:
+    print(f"\nEnsemble model {ENSEMBLE_MODEL_ID} training complete!")
+    print(f"Model saved as {checkpoint_filename}")
 
-print("Training Complete. Model saved as best_multimodal_model.keras")
