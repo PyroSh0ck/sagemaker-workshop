@@ -32,7 +32,7 @@ tf.keras.mixed_precision.set_global_policy(policy)
 
 # Constants
 IMG_SIZE = 224
-BATCH_SIZE = 64  # Balanced batch size for GPU memory
+BATCH_SIZE = 128  # Larger batch size for faster GPU throughput (T4 has 15GB VRAM)
 NUM_CLASSES = 2
 HEAD_EPOCHS = 12
 FINETUNE_EPOCHS = 20
@@ -69,9 +69,9 @@ def load_and_preprocess_image(path, label):
     image = tf.cast(image, tf.float32)
     return image, label
 
-# Make the tf datasets
+# Make the tf datasets with optimized settings
 ds_train = tf.data.Dataset.from_tensor_slices((train_paths, train_labels))
-ds_train = ds_train.shuffle(buffer_size=len(train_paths), reshuffle_each_iteration=True)
+ds_train = ds_train.shuffle(buffer_size=min(10000, len(train_paths)), reshuffle_each_iteration=True)
 ds_train = ds_train.map(load_and_preprocess_image, num_parallel_calls=tf.data.AUTOTUNE)
 
 ds_test = tf.data.Dataset.from_tensor_slices((test_paths, test_labels))
@@ -90,13 +90,13 @@ img_augmentation = keras.Sequential(
     name="img_augmentation",
 )
 
-# apply the augmentation and batching
+# apply the augmentation and batching with optimized prefetching
 ds_train = ds_train.batch(BATCH_SIZE, drop_remainder=True)
 ds_train = ds_train.map(lambda x, y: (img_augmentation(x), y), num_parallel_calls=tf.data.AUTOTUNE)
-ds_train = ds_train.prefetch(8)  # Moderate prefetch for better GPU pipeline
+ds_train = ds_train.prefetch(32)  # Large prefetch buffer for maximum GPU utilization
 
 ds_test = ds_test.batch(BATCH_SIZE, drop_remainder=True)
-ds_test = ds_test.prefetch(4)  # Moderate prefetch for validation
+ds_test = ds_test.prefetch(16)  # Larger prefetch for validation
 
 # the actual model
 inputs = keras.Input(shape=(IMG_SIZE, IMG_SIZE, 3))
