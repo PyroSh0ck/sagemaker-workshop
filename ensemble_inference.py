@@ -124,6 +124,9 @@ print(f"  = Total predictions per image: {1 + TTA_AUGMENTATIONS}\n")
 ensemble_predictions = []
 true_labels = test_df['label'].values.astype('int32')
 
+# Prepare tabular features (dummy values - all zeros)
+tabular_dummy = np.zeros((1, 5), dtype=np.float32)
+
 for idx, row in test_df.iterrows():
     image_path = row['image_path']
     
@@ -136,7 +139,8 @@ for idx, row in test_df.iterrows():
     # Original (no augmentation)
     batch = tf.expand_dims(original_image, axis=0)
     for model in models:
-        pred = model.predict(batch, verbose=0)
+        # Provide both image and tabular inputs
+        pred = model.predict([batch, tabular_dummy], verbose=0)
         image_predictions.append(pred[0])
     
     # TTA augmentations
@@ -144,7 +148,8 @@ for idx, row in test_df.iterrows():
         augmented = augment_tta(original_image)
         batch = tf.expand_dims(augmented, axis=0)
         for model in models:
-            pred = model.predict(batch, verbose=0)
+            # Provide both image and tabular inputs
+            pred = model.predict([batch, tabular_dummy], verbose=0)
             image_predictions.append(pred[0])
     
     # Average all predictions
