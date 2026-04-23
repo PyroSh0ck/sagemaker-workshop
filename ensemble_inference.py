@@ -5,7 +5,8 @@ Expected accuracy: 90%+
 """
 import os
 
-# Disable XLA JIT compilation to avoid libdevice errors on SageMaker
+# Disable XLA JIT compilation BEFORE importing TensorFlow
+os.environ['TF_ENABLE_XLA_JIT'] = '0'
 os.environ['TF_ENABLE_XLA'] = '0'
 
 import numpy as np
@@ -14,8 +15,10 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 
-# Run functions eagerly to avoid graph compilation issues
+# Force eager execution globally
 tf.config.run_functions_eagerly(True)
+tf.data.experimental.enable_debug_mode()
+tf.config.experimental.enable_debug_mode()
 
 # Constants
 IMG_SIZE = 224
