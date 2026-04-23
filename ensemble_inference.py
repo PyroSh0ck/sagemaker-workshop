@@ -18,7 +18,6 @@ from tensorflow.keras import layers
 # Force eager execution globally
 tf.config.run_functions_eagerly(True)
 tf.data.experimental.enable_debug_mode()
-tf.config.experimental.enable_debug_mode()
 
 # Constants
 IMG_SIZE = 224
