@@ -4,6 +4,11 @@ Loads 3 trained models and averages their predictions with TTA.
 Expected accuracy: 90%+
 """
 import os
+
+# Disable XLA JIT compilation to avoid libdevice errors on SageMaker
+os.environ['TF_ENABLE_XLA'] = '0'
+os.environ['XLA_FLAGS'] = '--xla_gpu_cuda_data_dir=/usr/local/cuda'
+
 import numpy as np
 import pandas as pd
 import tensorflow as tf
