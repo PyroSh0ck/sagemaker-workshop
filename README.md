@@ -48,7 +48,9 @@ The model is a **multimodal neural network** combining two branches:
 │   └── scoliosis/                # Scoliosis YOLOv5 Annotated Spine X-ray
 ├── Models/                       # Output folder for saved models
 ├── build_dataset.py              # Step 2: assembles bone_dataset.csv
-├── trainMultiModal.py            # Step 3: trains the full multimodal model
+├── trainMultiModal.py            # Core training script (multimodal model)
+├── train_ensemble.py             # Step 3: wrapper to train a single model
+├── ensemble_inference.py         # Step 4: evaluate model with test-time augmentation
 ├── bone_dataset.csv              # Generated dataset index (37,198 images)
 └── requirements.txt
 ```
@@ -64,7 +66,9 @@ git clone https://github.com/PyroSh0ck/sagemaker-workshop.git
 cd sagemaker-workshop
 bash setup_and_train.sh
 ```
-This installs dependencies, syncs datasets from S3, and runs all three training steps in order.
+This installs dependencies, syncs datasets from S3, runs MURA pre-training, trains the model, and evaluates accuracy with TTA.
+
+**Total time:** ~2.5 hours on `ml.p3.2xlarge` (Tesla V100) or ~5 hours on `ml.g4dn.xlarge` (Tesla T4)
 
 ---
 
@@ -104,7 +108,7 @@ python build_dataset.py         # scans all data/ folders, outputs bone_dataset.
 
 ### Step 3 — Train the multimodal model
 ```bash
-python trainMultiModal.py       # trains for up to 20 epochs, saves best_multimodal_model.keras
+python train_ensemble.py        # trains single model for ~1.5 hours, saves Models/ensemble_model_1.keras
 ```
 
 Training uses:
@@ -112,6 +116,20 @@ Training uses:
 - **Early stopping** with patience 3
 - **ReduceLROnPlateau** to halve learning rate when val_loss stalls
 - **Data augmentation** (random flip, brightness, contrast) on training set
+- **Mixed precision** (float16) for 4-5x speedup
+- **MURA pre-trained backbone** for better feature learning
+
+### Step 4 — Evaluate with Test-Time Augmentation
+```bash
+python ensemble_inference.py    # applies TTA (5 predictions per image), outputs accuracy and saves to inference_results.txt
+```
+
+Inference applies 5 predictions per image:
+- 1 original prediction
+- 4 augmented predictions (horizontal flip, vertical flip, brightness, contrast)
+- Averages them for more robust classification
+
+Results are automatically saved to `inference_results.txt` so you don't lose accuracy metrics on console restart.
 
 ---
 
