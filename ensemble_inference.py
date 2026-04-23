@@ -15,6 +15,7 @@ if FORCE_CPU_INFERENCE:
 os.environ['TF_ENABLE_XLA_JIT'] = '0'
 os.environ['TF_ENABLE_XLA'] = '0'
 
+import sys
 import numpy as np
 import pandas as pd
 import tensorflow as tf
@@ -30,7 +31,7 @@ tf.config.optimizer.set_jit(False)
 IMG_SIZE = 224
 BATCH_SIZE = 32
 NUM_CLASSES = 8
-NUM_ENSEMBLE_MODELS = 3
+NUM_ENSEMBLE_MODELS = 1  # Using single model (not ensemble)
 TTA_AUGMENTATIONS = 4  # Apply 4 augmentations + original = 5 predictions per image
 
 # Setup
@@ -42,7 +43,7 @@ if IS_SAGEMAKER:
     MODEL_DIR = os.environ.get('SM_MODEL_DIR', 'Models')
 
 print(f"\n{'='*60}")
-print(f"ENSEMBLE INFERENCE WITH TTA")
+print(f"SINGLE MODEL INFERENCE WITH TTA")
 print(f"Models: {NUM_ENSEMBLE_MODELS} | TTA: {TTA_AUGMENTATIONS} augmentations")
 print(f"{'='*60}\n")
 
@@ -112,28 +113,37 @@ def load_and_preprocess(path):
     image = tf.cast(image, tf.float32)
     return image
 
-# Load all ensemble models
-print("Loading ensemble models...")
+# Load single model
+print("Loading model...")
 models = []
-for model_id in range(1, NUM_ENSEMBLE_MODELS + 1):
-    model_path = os.path.join(MODEL_DIR, f'ensemble_model_{model_id}.keras')
-    if not os.path.exists(model_path):
-        # Fall back to single model if ensembles not available
-        model_path = os.path.join(MODEL_DIR, 'best_multimodal_model.keras')
-        if model_id == 1:
-            print(f"  Using single model: {os.path.basename(model_path)}")
-    else:
-        print(f"  ✓ Loaded Model {model_id}")
-    
-    model = keras.models.load_model(model_path, safe_mode=False)
-    models.append(model)
 
-num_loaded = len(models)
-print(f"Loaded {num_loaded} model(s)\n")
+# Try to load the best model in order of preference
+model_candidates = [
+    os.path.join(MODEL_DIR, 'ensemble_model_1.keras'),
+    os.path.join(MODEL_DIR, 'best_multimodal_model.keras'),
+    os.path.join(MODEL_DIR, 'multimodal_model.keras')
+]
 
-# Ensemble predictions with TTA
-print("Running ensemble inference with TTA...")
-print(f"  Original predictions: 1")
+model_path = None
+for candidate in model_candidates:
+    if os.path.exists(candidate):
+        model_path = candidate
+        break
+
+if model_path is None:
+    print(f"✗ Error: No model found in {MODEL_DIR}/")
+    print(f"  Searched for: {model_candidates}")
+    sys.exit(1)
+
+print(f"  ✓ Loading: {os.path.basename(model_path)}")
+model = keras.models.load_model(model_path, safe_mode=False)
+models = [model]
+
+print(f"Loaded 1 model\n")
+
+# Single model inference with TTA
+print("Running inference with TTA...")
+print(f"  Original prediction: 1")
 print(f"  + TTA augmentations: {TTA_AUGMENTATIONS}")
 print(f"  = Total predictions per image: {1 + TTA_AUGMENTATIONS}\n")
 
@@ -168,7 +178,7 @@ for idx, row in test_df.iterrows():
             pred = model.predict([batch, tabular_dummy], verbose=0)
             image_predictions.append(pred[0])
     
-    # Average all predictions
+    # Average TTA predictions (all from single model)
     avg_pred = np.mean(image_predictions, axis=0)
     ensemble_predictions.append(avg_pred)
     
@@ -181,7 +191,7 @@ predicted_labels = np.argmax(ensemble_predictions, axis=1)
 # Compute accuracy
 accuracy = np.mean(predicted_labels == true_labels)
 print(f"\n{'='*60}")
-print(f"ENSEMBLE TEST ACCURACY WITH TTA: {accuracy:.4f} ({accuracy*100:.2f}%)")
+print(f"FINAL TEST ACCURACY WITH TTA: {accuracy:.4f} ({accuracy*100:.2f}%)")
 print(f"{'='*60}\n")
 
 # Per-class accuracy
@@ -194,4 +204,18 @@ for class_id in range(NUM_CLASSES):
         class_acc = np.mean(predicted_labels[class_mask] == true_labels[class_mask])
         print(f"  {class_names[class_id]}: {class_acc:.4f}")
 
-print("\n✓ Ensemble inference complete!\n")
+print("\n✓ Inference complete!\n")
+
+# Save results to file
+results_file = 'inference_results.txt'
+with open(results_file, 'w') as f:
+    f.write(f"Single Model Test Accuracy (with TTA): {accuracy:.4f} ({accuracy*100:.2f}%)\n")
+    f.write(f"Total test images: {len(test_df)}\n\n")
+    f.write("Per-class accuracy:\n")
+    for class_id in range(NUM_CLASSES):
+        class_mask = true_labels == class_id
+        if class_mask.sum() > 0:
+            class_acc = np.mean(predicted_labels[class_mask] == true_labels[class_mask])
+            f.write(f"  {class_names[class_id]}: {class_acc:.4f}\n")
+
+print(f"Results saved to {results_file}")
