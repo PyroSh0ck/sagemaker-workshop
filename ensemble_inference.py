@@ -7,13 +7,15 @@ import os
 
 # Disable XLA JIT compilation to avoid libdevice errors on SageMaker
 os.environ['TF_ENABLE_XLA'] = '0'
-os.environ['XLA_FLAGS'] = '--xla_gpu_cuda_data_dir=/usr/local/cuda'
 
 import numpy as np
 import pandas as pd
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
+
+# Run functions eagerly to avoid graph compilation issues
+tf.config.run_functions_eagerly(True)
 
 # Constants
 IMG_SIZE = 224
