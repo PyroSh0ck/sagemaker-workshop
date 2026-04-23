@@ -5,6 +5,12 @@ Expected accuracy: 90%+
 """
 import os
 
+# Force CPU inference by default to avoid SageMaker libdevice/XLA GPU JIT failures.
+# Set FORCE_CPU_INFERENCE=0 to allow GPU execution.
+FORCE_CPU_INFERENCE = os.environ.get('FORCE_CPU_INFERENCE', '1') == '1'
+if FORCE_CPU_INFERENCE:
+    os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+
 # Disable XLA JIT compilation BEFORE importing TensorFlow
 os.environ['TF_ENABLE_XLA_JIT'] = '0'
 os.environ['TF_ENABLE_XLA'] = '0'
@@ -15,9 +21,10 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 
-# Force eager execution globally
+# Force eager execution globally and disable JIT optimizer paths
 tf.config.run_functions_eagerly(True)
 tf.data.experimental.enable_debug_mode()
+tf.config.optimizer.set_jit(False)
 
 # Constants
 IMG_SIZE = 224
