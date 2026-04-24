@@ -11,6 +11,10 @@ FORCE_CPU_INFERENCE = os.environ.get('FORCE_CPU_INFERENCE', '1') == '1'
 if FORCE_CPU_INFERENCE:
     os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
+# Low-spec mode (recommended for small instances like g3-class notebooks).
+# Set LOW_SPEC_MODE=0 for full evaluation defaults.
+LOW_SPEC_MODE = os.environ.get('LOW_SPEC_MODE', '1') == '1'
+
 # Disable XLA JIT compilation BEFORE importing TensorFlow
 os.environ['TF_ENABLE_XLA_JIT'] = '0'
 os.environ['TF_ENABLE_XLA'] = '0'
@@ -32,7 +36,8 @@ IMG_SIZE = 224
 BATCH_SIZE = 32
 NUM_CLASSES = 8
 NUM_ENSEMBLE_MODELS = 1  # Using single model (not ensemble)
-TTA_AUGMENTATIONS = 4  # Apply 4 augmentations + original = 5 predictions per image
+TTA_AUGMENTATIONS = int(os.environ.get('TTA_AUGMENTATIONS', '1' if LOW_SPEC_MODE else '4'))
+MAX_TEST_SAMPLES = int(os.environ.get('MAX_TEST_SAMPLES', '0'))
 
 # Setup
 DATA_ROOT = 'data'
@@ -45,6 +50,9 @@ if IS_SAGEMAKER:
 print(f"\n{'='*60}")
 print(f"SINGLE MODEL INFERENCE WITH TTA")
 print(f"Models: {NUM_ENSEMBLE_MODELS} | TTA: {TTA_AUGMENTATIONS} augmentations")
+print(f"Low-spec mode: {'ON' if LOW_SPEC_MODE else 'OFF'}")
+if FORCE_CPU_INFERENCE:
+    print("Execution device: CPU (forced)")
 print(f"{'='*60}\n")
 
 # Load test data
@@ -73,6 +81,8 @@ for _, label_df in df.groupby('label'):
     test_parts.append(label_df.iloc[n_train + n_val:])
 
 test_df = pd.concat(test_parts).sample(frac=1, random_state=42).reset_index(drop=True)
+if MAX_TEST_SAMPLES > 0:
+    test_df = test_df.iloc[:MAX_TEST_SAMPLES].copy()
 print(f"Test set: {len(test_df)} images\n")
 
 # TTA augmentation function

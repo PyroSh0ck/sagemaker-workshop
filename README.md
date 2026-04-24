@@ -124,6 +124,11 @@ Training uses:
 python ensemble_inference.py    # applies TTA (5 predictions per image), outputs accuracy and saves to inference_results.txt
 ```
 
+For smaller SageMaker instances, use low-spec mode (faster, CPU-safe):
+```bash
+LOW_SPEC_MODE=1 FORCE_CPU_INFERENCE=1 TTA_AUGMENTATIONS=1 python ensemble_inference.py
+```
+
 Inference applies 5 predictions per image:
 - 1 original prediction
 - 4 augmented predictions (horizontal flip, vertical flip, brightness, contrast)
